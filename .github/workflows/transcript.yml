@@ -17,8 +17,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Fix 1: Install Deno so yt-dlp has a supported JS runtime
+      - name: Install Deno (JS Runtime for yt-dlp)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: Install yt-dlp
-        run: pip install yt-dlp
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade "yt-dlp[default]"
 
       - name: Extract Transcript
         id: transcript_job
@@ -26,7 +34,7 @@ jobs:
           URL: ${{ inputs.youtube_url }}
         run: |
           python -c "
-          import os, json, re, yt_dlp
+          import os, json, glob, yt_dlp
 
           url = os.environ['URL']
 
@@ -37,35 +45,43 @@ jobs:
               'subtitleslangs': ['en.*', 'en'],
               'subtitlesformat': 'json3',
               'outtmpl': 'raw_transcript',
+              # Fix 2: Spoof client to bypass 'Sign in to confirm you are not a bot'
+              'extractor_args': {
+                  'youtube': {
+                      'player_client': ['android', 'mweb']
+                  }
+              }
           }
 
           with yt_dlp.YoutubeDL(ydl_opts) as ydl:
               info = ydl.extract_info(url, download=True)
               title = info.get('title', 'YouTube Video')
 
-          # Find the generated subtitle file
-          sub_file = [f for f in os.listdir('.') if f.startswith('raw_transcript') and f.endswith('.json3')][0]
+          # Find generated subtitle JSON file
+          sub_files = glob.glob('raw_transcript*.json3')
+          if not sub_files:
+              raise Exception('No transcript found for this video.')
 
-          with open(sub_file, 'r', encoding='utf-8') as f:
+          with open(sub_files[0], 'r', encoding='utf-8') as f:
               data = json.load(f)
 
-          # Extract text lines
+          # Parse transcript lines
           lines = []
           for event in data.get('events', []):
               if 'segs' in event:
                   phrase = ''.join([seg['utf8'] for seg in event['segs'] if 'utf8' in seg])
                   if phrase.strip():
-                      lines.append(phrase)
+                      lines.append(phrase.strip())
 
           full_text = ' '.join(lines)
 
-          # Save to text file
+          # Save output to text file
           with open('transcript.txt', 'w', encoding='utf-8') as f:
               f.write(f'Title: {title}\nURL: {url}\n\n{full_text}')
 
-          # Write to GitHub Step Summary (visible in web UI)
+          # Output summary directly into GitHub Actions run UI
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write(f'### Transcript for: {title}\n\n{full_text[:1000]}...\n\n*(Full text saved to artifact)*')
+              summary.write(f'### Transcript: {title}\n\n{full_text[:1200]}...\n\n*(Full text available in Artifacts)*')
           "
 
       - name: Downloadable Artifact
