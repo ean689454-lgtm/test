@@ -1,0 +1,75 @@
+name: Extract YouTube Transcript
+
+on:
+  workflow_dispatch:
+    inputs:
+      youtube_url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install yt-dlp
+        run: pip install yt-dlp
+
+      - name: Extract Transcript
+        id: transcript_job
+        env:
+          URL: ${{ inputs.youtube_url }}
+        run: |
+          python -c "
+          import os, json, re, yt_dlp
+
+          url = os.environ['URL']
+
+          ydl_opts = {
+              'skip_download': True,
+              'writeautomaticsub': True,
+              'writesubtitles': True,
+              'subtitleslangs': ['en.*', 'en'],
+              'subtitlesformat': 'json3',
+              'outtmpl': 'raw_transcript',
+          }
+
+          with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+              info = ydl.extract_info(url, download=True)
+              title = info.get('title', 'YouTube Video')
+
+          # Find the generated subtitle file
+          sub_file = [f for f in os.listdir('.') if f.startswith('raw_transcript') and f.endswith('.json3')][0]
+
+          with open(sub_file, 'r', encoding='utf-8') as f:
+              data = json.load(f)
+
+          # Extract text lines
+          lines = []
+          for event in data.get('events', []):
+              if 'segs' in event:
+                  phrase = ''.join([seg['utf8'] for seg in event['segs'] if 'utf8' in seg])
+                  if phrase.strip():
+                      lines.append(phrase)
+
+          full_text = ' '.join(lines)
+
+          # Save to text file
+          with open('transcript.txt', 'w', encoding='utf-8') as f:
+              f.write(f'Title: {title}\nURL: {url}\n\n{full_text}')
+
+          # Write to GitHub Step Summary (visible in web UI)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(f'### Transcript for: {title}\n\n{full_text[:1000]}...\n\n*(Full text saved to artifact)*')
+          "
+
+      - name: Downloadable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-transcript
+          path: transcript.txt
