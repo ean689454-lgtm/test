@@ -1,73 +1,59 @@
-import os
-import re
+import subprocess
 import sys
+import os
+import glob
 
-from youtube_transcript_api import YouTubeTranscriptApi
-
-
-# Get URL from command line
 url = sys.argv[1]
 
-match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
-
-if not match:
-    raise ValueError("Invalid YouTube URL")
-
-video_id = match.group(1)
-
+os.makedirs("subs", exist_ok=True)
 
 try:
-    api = YouTubeTranscriptApi()
+    command = [
+        "yt-dlp",
+        "--skip-download",
 
-    if hasattr(api, "list"):
-        transcript_list = api.list(video_id)
-    elif hasattr(api, "list_transcripts"):
-        transcript_list = api.list_transcripts(video_id)
-    else:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # Download manual subtitles if available
+        "--write-subs",
 
-    transcript = None
+        # Also download auto-generated subtitles
+        "--write-auto-subs",
 
-    # Manual English
-    try:
-        transcript = transcript_list.find_manually_created_transcript(
-            ["en", "en-US", "en-GB"]
-        )
-    except Exception:
-        pass
+        # Prefer English
+        "--sub-langs", "en.*,en",
 
-    # Auto-generated English
-    if not transcript:
-        try:
-            transcript = transcript_list.find_generated_transcript(
-                ["en", "en-US", "en-GB"]
-            )
-        except Exception:
-            pass
+        # VTT subtitle format
+        "--sub-format", "vtt",
 
-    # Any language fallback
-    if not transcript:
-        for t in transcript_list:
-            transcript = t
-            break
+        # Output location
+        "-o", "subs/%(id)s.%(ext)s",
 
-    if not transcript:
-        raise Exception("No transcripts found.")
+        url
+    ]
 
-    fetched_data = transcript.fetch()
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True
+    )
 
-    full_text = " ".join([
-        item.text if hasattr(item, "text") else item["text"]
-        for item in fetched_data
-    ])
+    print(result.stdout)
+    print(result.stderr)
 
-    print("\n" + "=" * 60)
-    print(f"TRANSCRIPT ({transcript.language_code})")
-    print(f"VIDEO ID: {video_id}")
-    print("=" * 60)
-    print(full_text)
-    print("=" * 60)
+    if result.returncode != 0:
+        raise Exception("yt-dlp failed")
+
+    files = glob.glob("subs/*.vtt")
+
+    print("\nDownloaded subtitle files:")
+    print(files)
+
+    if not files:
+        raise Exception("No subtitles found")
+
+    with open(files[0], "r", encoding="utf-8") as f:
+        print("\n===== SUBTITLE CONTENT =====\n")
+        print(f.read())
 
 except Exception as e:
-    print(f"Error fetching transcript: {e}")
+    print("ERROR:", str(e))
     sys.exit(1)
