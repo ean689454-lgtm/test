@@ -1,4 +1,4 @@
-name: Test
+name: Test YouTube Transcript
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -21,10 +22,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package
+      - name: Install yt-dlp
         run: |
-          pip install youtube-transcript-api
+          python -m pip install --upgrade pip
+          pip install -U yt-dlp
 
-      - name: Extract transcript
+      - name: Extract subtitles
         run: |
           python main.py "${{ inputs.youtube_url }}"
